@@ -15,8 +15,8 @@ use crate::erc20::{Erc20, Erc20Params, Erc20Error};
 /// Immutable definitions
 struct StylusTokenParams;
 impl Erc20Params for StylusTokenParams {
-    const NAME: &'static str = "rampop";
-    const SYMBOL: &'static str = "POP";
+    const NAME: &'static str = "MayToken";
+    const SYMBOL: &'static str = "MTK";
     const DECIMALS: u8 = 18;
 }
 

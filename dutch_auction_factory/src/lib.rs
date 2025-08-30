@@ -8,18 +8,17 @@
 #![cfg_attr(not(any(test, feature = "export-abi")), no_main)]
 #![cfg_attr(not(any(test, feature = "export-abi")), no_std)]
 
-#[macro_use]
 extern crate alloc;
 
 use alloc::vec::Vec;
 
-/// Import items from the SDK. The prelude contains common traits and macros.
 use stylus_sdk::{
     alloy_primitives::{U256, Address, B256}, 
     prelude::*, 
-    deploy::RawDeploy
+    deploy::RawDeploy,
+    msg,
+    crypto
 };
-use alloy_sol_types::sol;
 
 // Import the compiled dutch auction WASM bytecode at compile time
 static DUTCH_AUCTION_WASM: &[u8] = include_bytes!("../dutch_auction.wasm");
@@ -38,7 +37,7 @@ impl DutchAuctionFactory {
     /// Initialize the factory
     pub fn new(&mut self) -> Result<(), Vec<u8>> {
         self.auction_count.set(U256::from(0));
-        self.owner.set(self.vm().msg_sender());
+        self.owner.set(msg::sender());
         Ok(())
     }
 
@@ -64,7 +63,7 @@ impl DutchAuctionFactory {
         }
 
         let auction_id = self.auction_count.get() + U256::from(1);
-        let sender = self.vm().msg_sender();
+        let sender = msg::sender();
         
         // Use embedded bytecode
         let bytecode = DUTCH_AUCTION_WASM;
@@ -76,7 +75,7 @@ impl DutchAuctionFactory {
         salt_data.extend_from_slice(nft_contract.as_slice());
         salt_data.extend_from_slice(&token_id.as_le_bytes());
         
-        let salt = B256::from_slice(&self.vm().native_keccak256(&salt_data)[0..32]);
+        let salt = B256::from_slice(&crypto::keccak(salt_data)[0..32]);
 
         // Deploy the auction contract using RawDeploy with CREATE2
         let auction_address = unsafe {
@@ -94,16 +93,6 @@ impl DutchAuctionFactory {
         self.auction_count.set(auction_id);
         self.auctions.setter(auction_id).set(auction_address);
         
-        log(self.vm(), AuctionCreated {
-            auction_id,
-            creator: sender,
-            nft_contract,
-            token_id,
-            starting_price,
-            ending_price,
-            duration,
-            auction_address,
-        });
         
         Ok(auction_address)
     }
@@ -127,17 +116,4 @@ impl DutchAuctionFactory {
     pub fn get_bytecode_length(&self) -> U256 {
         U256::from(DUTCH_AUCTION_WASM.len())
     }
-}
-
-sol! {
-    event AuctionCreated(
-        uint256 indexed auction_id,
-        address indexed creator,
-        address indexed nft_contract,
-        uint256 token_id,
-        uint256 starting_price,
-        uint256 ending_price,
-        uint256 duration,
-        address auction_address
-    );
 }
