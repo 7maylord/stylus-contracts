@@ -6,5 +6,5 @@ pub extern "C" fn main() {}
 
 #[cfg(feature = "export-abi")]
 fn main() {
-    nft_marketplace::print_from_args();
+    println!("hello world from nft marketplace contract");
 }

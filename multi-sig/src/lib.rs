@@ -3,9 +3,9 @@ extern crate alloc;
 
 use stylus_sdk::{
     prelude::*,
+    alloy_sol_types::sol,
 };
 use alloy_primitives::{U256, Address};
-use alloy_sol_types::sol;
 use alloc::vec::Vec;
 
 sol_storage! {
@@ -147,17 +147,7 @@ impl MultiSigWallet {
             transaction.executed.get(),
             transaction.confirmation_count.get(),
         )
-    }
-
-    /// Check if transaction is confirmed by owner
-    pub fn is_confirmed(&self, tx_id: U256, owner: Address) -> bool {
-        self.confirmations.get(tx_id).get(owner)
-    }
-
-    /// Get number of confirmations for transaction
-    pub fn get_confirmation_count(&self, tx_id: U256) -> U256 {
-        self.transactions.get(tx_id).confirmation_count.get()
-    }
+    }   
 
     /// Get required confirmations
     pub fn get_required_confirmations(&self) -> U256 {
@@ -168,6 +158,16 @@ impl MultiSigWallet {
     pub fn get_transaction_count(&self) -> U256 {
         self.transaction_count.get()
     }
+
+    /// Get number of confirmations for transaction
+    pub fn get_confirmation_count(&self, tx_id: U256) -> U256 {
+        self.transactions.get(tx_id).confirmation_count.get()
+    }
+
+    /// Check if transaction is confirmed by owner
+    pub fn is_confirmed(&self, tx_id: U256, owner: Address) -> bool {
+        self.confirmations.get(tx_id).get(owner)
+    } 
 
     /// Get owner count
     pub fn get_owner_count(&self) -> U256 {

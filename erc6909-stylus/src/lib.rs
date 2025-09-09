@@ -1,352 +1,246 @@
-#![no_main]
-#![no_std]
-extern crate alloc;
+#![cfg_attr(not(any(test, feature = "export-abi")), no_main)]
+#![cfg_attr(not(any(test, feature = "export-abi")), no_std)]
 
-use alloy_primitives::{Address, U256};
-use stylus_sdk::{
-    alloy_sol_types::{sol, SolValue},
-    evm, msg,
-    prelude::*,
-    storage::{StorageAddress, StorageBool, StorageMap, StorageUint},
+#[macro_use]
+extern crate alloc;
+use alloc::vec::Vec;
+
+use alloy_primitives::Address;
+use alloy_sol_types::{sol, SolError};
+use openzeppelin_stylus::{
+    access::control::{self, AccessControl, IAccessControl},
+    utils::introspection::erc165::IErc165,
 };
 
-// Define events using stylus-sdk macros instead of sol!
-#[derive(Debug)]
-pub struct TransferSingle {
-    pub operator: Address,
-    pub from: Address,
-    pub to: Address,
-    pub id: U256,
-    pub amount: U256,
-}
-
-#[derive(Debug)]
-pub struct ApprovalSingle {
-    pub owner: Address,
-    pub spender: Address,
-    pub id: U256,
-    pub amount: U256,
-}
-
-#[derive(Debug)]
-pub struct OperatorSet {
-    pub owner: Address,
-    pub operator: Address,
-    pub approved: bool,
-}
-
-// Define custom errors
+/// Import items from the SDK. The prelude contains common traits and macros.
+use stylus_sdk::{
+    alloy_primitives::U256,
+    msg,
+    prelude::*,
+    storage::{StorageBool, StorageMap, StorageU256},
+};
 
 sol! {
-    error InsufficientBalance();
-    error InsufficientAllowance();
-    error InvalidOperator();
-    error TransferToZeroAddress();
-    error TransferFromZeroAddress();
-    error Unauthorized();
-    error ArrayLengthMismatch();
+    event Transfer();
+}
+sol! {
+    error ERC6909InsufficientBalance(address sender,uint256 balance,uint256 needed ,uint256 id);
+
+    error ERC6909InsufficientAllowance(address spender,uint256 allowance,uint256 needed,uint256 id);
+
+    error ERC6909InvalidApprover(address approver);
+
+    error ERC6909InvalidReciever(address reciever);
+
+    error ERC6909InvalidSender(address sender);
+
+    error ERC6909InvalidSpender(address spender);
+
 }
 
 #[derive(SolidityError)]
 pub enum ERC6909Error {
-    InsufficientBalance(InsufficientBalance),
-    InsufficientAllowance(InsufficientAllowance),
-    InvalidOperator(InvalidOperator),
-    TransferToZeroAddress(TransferToZeroAddress),
-    TransferFromZeroAddress(TransferFromZeroAddress),
-    Unauthorized(Unauthorized),
-    ArrayLengthMismatch(ArrayLengthMismatch),
+    ERC6909InsufficientAllowance(ERC6909InsufficientAllowance),
+    ERC6909InsufficientBalance(ERC6909InsufficientBalance),
+    ERC6909InvalidApprover(ERC6909InvalidApprover),
+    ERC6909InvalidReciever(ERC6909InvalidReciever),
+    ERC6909InvalidSender(ERC6909InvalidSender),
+    ERC6909InvalidSpender(ERC6909InvalidSpender),
 }
 
-// Storage layout for ERC-6909
+impl From<control::Error> for ERC6909Error {
+    fn from(value: control::Error) -> Self {
+        match value {
+            control::Error::UnauthorizedAccount(e) => {
+                ERC6909Error::ERC6909InvalidApprover(ERC6909InvalidApprover {
+                    approver: e.account,
+                })
+            }
+            control::Error::BadConfirmation(e) => {
+                ERC6909Error::ERC6909InvalidSender(ERC6909InvalidSender {
+                    sender: Address::ZERO,
+                })
+            }
+        }
+    }
+}
+
 #[storage]
 #[entrypoint]
 pub struct ERC6909 {
-    /// Balance of tokens: owner => token_id => balance
-    balances: StorageMap<Address, StorageMap<U256, StorageUint<256, 4>>>,
-    
-    /// Allowances: owner => spender => token_id => amount
-    allowances: StorageMap<Address, StorageMap<Address, StorageMap<U256, StorageUint<256, 4>>>>,
-    
-    /// Operator approvals: owner => operator => approved
-    operators: StorageMap<Address, StorageMap<Address, StorageBool>>,
-    
-    /// Total supply per token ID
-    total_supplies: StorageMap<U256, StorageUint<256, 4>>,
-    
-    /// Contract owner (for access control)
-    owner: StorageAddress,
-    
-    /// Authorized minters: minter => authorized
-    minters: StorageMap<Address, StorageBool>,
+    _balances: StorageMap<Address, StorageMap<U256, StorageU256>>,
+    _operatorApprovals: StorageMap<Address, StorageMap<Address, StorageBool>>,
+    _allowances: StorageMap<Address, StorageMap<Address, StorageMap<U256, StorageU256>>>,
 }
-
 
 #[public]
 impl ERC6909 {
-    /// Returns the total supply of a specific token ID
-    pub fn total_supply(&self, id: U256) -> U256 {
-        self.total_supplies.get(id).clone()
+    pub fn balanceOf(&mut self, address: Address, id: U256) -> U256 {
+        self._balances.get(address).get(id)
     }
 
-    /// Returns the balance of an owner for a specific token ID
-    pub fn balance_of(&self, owner: Address, id: U256) -> U256 {
-        self.balances.getter(owner).getter(id).get()
+    pub fn allowance(self, owner: Address, spender: Address, id: U256) -> U256 {
+        self._allowances.get(owner).get(spender).get(id)
     }
 
-    /// Returns the allowance of a spender for a specific token ID from an owner
-    pub fn allowance(&self, owner: Address, spender: Address, id: U256) -> U256 {
-        self.allowances.getter(owner).getter(spender).getter(id).get()
+    pub fn isOperator(&mut self, owner: Address, spender: Address) {
+        let _ = self._operatorApprovals.get(owner).get(spender);
     }
 
-    /// Returns whether an operator is approved for all tokens of an owner
-    pub fn is_operator(&self, owner: Address, operator: Address) -> bool {
-        self.operators.getter(owner).getter(operator).get()
+    pub fn approve(&mut self, spender: Address, id: U256, amount: U256) -> bool {
+        let owner = msg::sender();
+        self._approve(owner, spender, id, amount);
+        true
     }
 
-    /// Transfers tokens from one address to another
-    pub fn transfer_from(
+    pub fn setOperator(self, spender: Address, approved: bool) -> bool {
+        todo!("not implemented");
+        return true;
+    }
+
+    pub fn transfer(&mut self, reciever: Address, id: U256, amount: U256) -> bool {
+        let sender = msg::sender();
+        self._transfer(sender, reciever, id, amount);
+        true
+    }
+
+    pub fn transferFrom(self, sender: Address, id: U256, amount: U256) -> bool {
+        todo!("not implemented");
+        return true;
+    }
+
+    pub fn _mint(&mut self, to: Address, id: U256, amount: U256) -> Result<(), ERC6909Error> {
+        if to.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidReciever(
+                ERC6909InvalidReciever { reciever: to },
+            ));
+        }
+        self._update(Address::ZERO, to, id, amount)?;
+        Ok(())
+    }
+
+    pub fn _update(
         &mut self,
         from: Address,
         to: Address,
         id: U256,
         amount: U256,
-    ) -> Result<bool, ERC6909Error> {
-        if from == Address::ZERO {
-            return Err(ERC6909Error::TransferFromZeroAddress(TransferFromZeroAddress {}));
-        }
-        
-        if to == Address::ZERO {
-            return Err(ERC6909Error::TransferToZeroAddress(TransferToZeroAddress {}));
-        }
-
-        let caller = msg::sender();
-        
-        // Check if caller is authorized to transfer
-        if caller != from && !self.is_operator(from, caller) {
-            let current_allowance = self.allowance(from, caller, id);
-            if current_allowance < amount {
-                return Err(ERC6909Error::InsufficientAllowance(InsufficientAllowance {}));
+    ) -> Result<(), ERC6909Error> {
+        if !from.is_zero() {
+            let fromBalance = self._balances.get(from).get(id);
+            if fromBalance < amount {
+                return Err(ERC6909Error::ERC6909InsufficientBalance(
+                    ERC6909InsufficientBalance {
+                        sender: from,
+                        balance: fromBalance,
+                        needed: amount,
+                        id,
+                    },
+                ));
             }
-            
-            // Update allowance if not max value (infinite approval)
-            if current_allowance != U256::MAX {
-                let new_allowance = current_allowance - amount;
-                self.allowances.setter(from).setter(caller).setter(id).set(new_allowance);
-            }
+            self._balances
+                .setter(from)
+                .setter(id)
+                .set(fromBalance - amount);
         }
-
-        // Check balance
-        let from_balance = self.balance_of(from, id);
-        if from_balance < amount {
-            return Err(ERC6909Error::InsufficientBalance(InsufficientBalance {}));
+        if !to.is_zero() {
+            let toBalance = self._balances.get(to).get(id);
+            self._balances.setter(to).setter(id).set(toBalance + amount);
         }
-
-        // Update balances
-        let new_from_balance = from_balance - amount;
-        self.balances.setter(from).setter(id).set(new_from_balance);
-        
-        let to_balance = self.balance_of(to, id);
-        let new_to_balance = to_balance + amount;
-        self.balances.setter(to).setter(id).set(new_to_balance);
-
-        // Emit transfer event using raw log
-        evm::raw_log(&[
-            // TransferSingle event signature
-            alloy_primitives::keccak256("TransferSingle(address,address,address,uint256,uint256)").into(),
-            caller.into_word().into(),
-            from.into_word().into(),
-            to.into_word().into(),
-        ], &[id, amount].abi_encode()).ok();
-
-        Ok(true)
+        Ok(())
     }
 
-    /// Transfers tokens from caller to another address
-    pub fn transfer(&mut self, to: Address, id: U256, amount: U256) -> Result<bool, ERC6909Error> {
-        let from = msg::sender();
-        self.transfer_from(from, to, id, amount)
-    }
-
-    /// Approves a spender to transfer a specific amount of tokens for a specific token ID
-    pub fn approve(
+    pub fn _transfer(
         &mut self,
+        from: Address,
+        to: Address,
+        id: U256,
+        amount: U256,
+    ) -> Result<(), ERC6909Error> {
+        if from.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidSender(ERC6909InvalidSender {
+                sender: from,
+            }));
+        }
+        if to.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidReciever(
+                ERC6909InvalidReciever { reciever: to },
+            ));
+        }
+        self._update(from, to, id, amount)?;
+        Ok(())
+    }
+
+    pub fn _approve(
+        &mut self,
+        owner: Address,
         spender: Address,
         id: U256,
         amount: U256,
-    ) -> Result<bool, ERC6909Error> {
-        let owner = msg::sender();
-        
-        self.allowances.setter(owner).setter(spender).setter(id).set(amount);
-
-        // Emit approval event using raw log
-        evm::raw_log(&[
-            // ApprovalSingle event signature
-            alloy_primitives::keccak256("ApprovalSingle(address,address,uint256,uint256)").into(),
-            owner.into_word().into(),
-            spender.into_word().into(),
-        ], &[id, amount].abi_encode()).ok();
-
-        Ok(true)
-    }
-
-    /// Sets or unsets an operator for all tokens of the caller
-    pub fn set_operator(&mut self, operator: Address, approved: bool) -> Result<bool, ERC6909Error> {
-        let owner = msg::sender();
-        
-        if owner == operator {
-            return Err(ERC6909Error::InvalidOperator(InvalidOperator {}));
+    ) -> Result<(), ERC6909Error> {
+        if owner.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidApprover(
+                ERC6909InvalidApprover { approver: owner },
+            ));
+        }
+        if spender.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidSpender(ERC6909InvalidSpender {
+                spender,
+            }));
         }
 
-        self.operators.setter(owner).setter(operator).set(approved);
-
-        // Emit operator event using raw log
-        let approved_data = if approved { U256::from(1) } else { U256::from(0) };
-        evm::raw_log(&[
-            // OperatorSet event signature
-            alloy_primitives::keccak256("OperatorSet(address,address,bool)").into(),
-            owner.into_word().into(),
-            operator.into_word().into(),
-        ], &[approved_data].abi_encode()).ok();
-
-        Ok(true)
+        self._allowances
+            .setter(owner)
+            .setter(spender)
+            .setter(id)
+            .set(amount);
+        Ok(())
     }
 
-    /// Sets the contract owner (only callable by current owner or if no owner set)
-    pub fn set_owner(&mut self, new_owner: Address) -> Result<bool, ERC6909Error> {
-        let caller = msg::sender();
-        let current_owner = self.owner.get();
-        
-        // If no owner is set, anyone can become owner (for initialization)
-        // Otherwise, only current owner can transfer ownership
-        if current_owner != Address::ZERO && current_owner != caller {
-            return Err(ERC6909Error::Unauthorized(Unauthorized {}));
-        }
-        
-        self.owner.set(new_owner);
-        Ok(true)
-    }
-    
-    /// Authorizes or revokes authorization for a minter (only owner)
-    pub fn set_minter(&mut self, minter: Address, authorized: bool) -> Result<bool, ERC6909Error> {
-        let caller = msg::sender();
-        let owner = self.owner.get();
-        
-        if owner != caller {
-            return Err(ERC6909Error::Unauthorized(Unauthorized {}));
-        }
-        
-        self.minters.setter(minter).set(authorized);
-        Ok(true)
-    }
-    
-    /// Returns the contract owner
-    pub fn get_owner(&self) -> Address {
-        self.owner.get()
-    }
-    
-    /// Returns whether an address is an authorized minter
-    pub fn is_minter(&self, minter: Address) -> bool {
-        self.minters.get(minter)
-    }
-
-    /// Mints new tokens (only authorized minters)
-    pub fn mint(&mut self, to: Address, id: U256, amount: U256) -> Result<bool, ERC6909Error> {
-        let caller = msg::sender();
-        let owner = self.owner.get();
-        
-        // Only owner or authorized minters can mint
-        if caller != owner && !self.is_minter(caller) {
-            return Err(ERC6909Error::Unauthorized(Unauthorized {}));
-        }
-        
-        if to == Address::ZERO {
-            return Err(ERC6909Error::TransferToZeroAddress(TransferToZeroAddress {}));
-        }
-
-        // Update balance
-        let current_balance = self.balance_of(to, id);
-        let new_balance = current_balance + amount;
-        self.balances.setter(to).setter(id).set(new_balance);
-
-        // Update total supply
-        let current_supply = self.total_supply(id);
-        let new_supply = current_supply + amount;
-        self.total_supplies.setter(id).set(new_supply);
-
-        // Emit transfer event from zero address using raw log
-        let caller = msg::sender();
-        evm::raw_log(&[
-            // TransferSingle event signature
-            alloy_primitives::keccak256("TransferSingle(address,address,address,uint256,uint256)").into(),
-            caller.into_word().into(),
-            Address::ZERO.into_word().into(),
-            to.into_word().into(),
-        ], &[id, amount].abi_encode()).ok();
-
-        Ok(true)
-    }
-
-    /// Burns tokens 
-    pub fn burn(&mut self, from: Address, id: U256, amount: U256) -> Result<bool, ERC6909Error> {
-        let caller = msg::sender();
-        
-        // Check if caller is authorized
-        if caller != from && !self.is_operator(from, caller) {
-            let current_allowance = self.allowance(from, caller, id);
-            if current_allowance < amount {
-                return Err(ERC6909Error::InsufficientAllowance(InsufficientAllowance {}));
-            }
-            
-            if current_allowance != U256::MAX {
-                let new_allowance = current_allowance - amount;
-                self.allowances.setter(from).setter(caller).setter(id).set(new_allowance);
-            }
-        }
-
-        // Check balance
-        let from_balance = self.balance_of(from, id);
-        if from_balance < amount {
-            return Err(ERC6909Error::InsufficientBalance(InsufficientBalance {}));
-        }
-
-        // Update balance
-        let new_balance = from_balance - amount;
-        self.balances.setter(from).setter(id).set(new_balance);
-
-        // Update total supply
-        let current_supply = self.total_supply(id);
-        let new_supply = current_supply - amount;
-        self.total_supplies.setter(id).set(new_supply);
-
-        // Emit transfer event to zero address using raw log
-        evm::raw_log(&[
-            // TransferSingle event signature
-            alloy_primitives::keccak256("TransferSingle(address,address,address,uint256,uint256)").into(),
-            caller.into_word().into(),
-            from.into_word().into(),
-            Address::ZERO.into_word().into(),
-        ], &[id, amount].abi_encode()).ok();
-
-        Ok(true)
-    }
-
-    /// Batch transfer multiple token types
-    pub fn batch_transfer_from(
+    pub fn _setOperator(
         &mut self,
-        from: Address,
-        to: Address,
-        ids: alloc::vec::Vec<U256>,
-        amounts: alloc::vec::Vec<U256>,
-    ) -> Result<bool, ERC6909Error> {
-        if ids.len() != amounts.len() {
-            return Err(ERC6909Error::ArrayLengthMismatch(ArrayLengthMismatch {}));
+        owner: Address,
+        spender: Address,
+        approved: bool,
+    ) -> Result<(), ERC6909Error> {
+        if owner.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidSpender(ERC6909InvalidSpender {
+                spender: owner,
+            }));
         }
-
-        for (id, amount) in ids.iter().zip(amounts.iter()) {
-            self.transfer_from(from, to, *id, *amount)?;
+        if spender.is_zero() {
+            return Err(ERC6909Error::ERC6909InvalidSpender(ERC6909InvalidSpender {
+                spender,
+            }));
         }
+        self._operatorApprovals
+            .setter(owner)
+            .setter(spender)
+            .set(approved);
+        Ok(())
+    }
 
-        Ok(true)
+    pub fn _spendAllowance(
+        &mut self,
+        owner: Address,
+        spender: Address,
+        id: U256,
+        amount: U256,
+    ) -> Result<(), ERC6909Error> {
+        let allowance = self._allowances.get(owner).get(spender).get(id);
+        if allowance < amount {
+            return Err(ERC6909Error::ERC6909InsufficientAllowance(
+                ERC6909InsufficientAllowance {
+                    needed: spender,
+                    id: allowance,
+                },
+            ));
+        }
+        self._allowances
+            .setter(owner)
+            .setter(spender)
+            .setter(id)
+            .set(allowance - amount);
+        Ok(())
     }
 }

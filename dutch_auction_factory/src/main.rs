@@ -6,5 +6,5 @@ pub extern "C" fn main() {}
 
 #[cfg(feature = "export-abi")]
 fn main() {
-    dutch_auction_factory::print_from_args();
+    println!("hello world from dutch auction factory contract");
 }

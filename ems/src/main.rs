@@ -6,5 +6,5 @@ pub extern "C" fn main() {}
 
 #[cfg(feature = "export-abi")]
 fn main() {
-    ems::print_from_args();
+    println!("hello world from ems contract");
 }

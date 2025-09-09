@@ -7,7 +7,6 @@ pub mod erc20;
 
 use alloy_primitives::{Address, U256};
 use stylus_sdk::{
-    msg,
     prelude::*
 };
 use crate::erc20::{Erc20, Erc20Params, Erc20Error};
@@ -37,13 +36,13 @@ sol_storage! {
 impl StylusToken {
     /// Initialize contract with initial supply to deployer
     pub fn init(&mut self, initial_supply: U256) -> Result<(), Erc20Error> {
-        self.erc20.mint(msg::sender(), initial_supply)?;
+        self.erc20.mint(self.vm().msg_sender(), initial_supply)?;
         Ok(())
     }
 
     /// Mints tokens
     pub fn mint(&mut self, value: U256) -> Result<(), Erc20Error> {
-        self.erc20.mint(msg::sender(), value)?;
+        self.erc20.mint(self.vm().msg_sender(), value)?;
         Ok(())
     }
 
@@ -55,7 +54,7 @@ impl StylusToken {
 
     /// Burns tokens
     pub fn burn(&mut self, value: U256) -> Result<(), Erc20Error> {
-        self.erc20.burn(msg::sender(), value)?;
+        self.erc20.burn(self.vm().msg_sender(), value)?;
         Ok(())
     }
 }

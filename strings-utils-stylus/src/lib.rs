@@ -6,6 +6,14 @@
 
 use alloy_primitives::{Address, I256, U256};
 
+#[cfg(feature = "export-abi")]
+use stylus_sdk::abi::export;
+
+#[cfg(feature = "export-abi")]
+pub fn print_from_args() {
+    export::print_abi("StringsUtils", "0.1.11");
+}
+
 /// Hex digits constant used for hex string conversion
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 

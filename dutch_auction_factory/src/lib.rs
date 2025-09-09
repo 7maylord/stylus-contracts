@@ -97,14 +97,15 @@ impl DutchAuctionFactory {
         Ok(auction_address)
     }
 
-    /// Get auction address by ID
-    pub fn get_auction(&self, auction_id: U256) -> Address {
-        self.auctions.get(auction_id)
-    }
-
+    
     /// Get total number of auctions created
     pub fn get_auction_count(&self) -> U256 {
         self.auction_count.get()
+    }
+
+    /// Get auction address by ID
+    pub fn get_auction(&self, auction_id: U256) -> Address {
+        self.auctions.get(auction_id)
     }
 
     /// Get factory owner

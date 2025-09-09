@@ -2,9 +2,9 @@ extern crate alloc;
 
 use stylus_sdk::{
     prelude::*,
+    alloy_sol_types::sol,
 };
 use alloy_primitives::{U256, Address};
-use alloy_sol_types::sol;
 
 sol_storage! {
     #[entrypoint]
@@ -203,11 +203,6 @@ impl NFTMarketplace {
         Ok(())
     }
 
-    /// Check if item exists
-    pub fn item_exists(&self, item_id: U256) -> bool {
-        item_id <= self.item_count.get() && item_id > U256::from(0)
-    }
-
     /// Check if item is sold
     pub fn is_item_sold(&self, item_id: U256) -> bool {
         self.sold_items.get(item_id)
@@ -217,6 +212,11 @@ impl NFTMarketplace {
     pub fn get_fee_percentage(&self) -> U256 {
         self.fee_percentage.get()
     }
+
+    /// Check if item exists
+    pub fn item_exists(&self, item_id: U256) -> bool {
+        item_id <= self.item_count.get() && item_id > U256::from(0)
+    }    
 
     /// Get total items count
     pub fn get_item_count(&self) -> U256 {

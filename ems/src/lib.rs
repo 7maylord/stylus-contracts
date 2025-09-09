@@ -4,8 +4,9 @@ use stylus_sdk::{
     prelude::*,
     msg, block
 };
-use alloy_primitives::{U256, Address};
+
 use alloc::{vec::Vec, string::String};
+use alloy_primitives::{U256, Address};
 
 sol_storage! {
     #[entrypoint]
@@ -78,7 +79,7 @@ impl EmployeeManagement {
         self.only_admin()?;
         
         // check if employee exists
-        let (is_active) = {
+        let is_active = {
             let employee = self.employees.get(employee_address);
             employee.is_active.get()
         };
@@ -94,28 +95,26 @@ impl EmployeeManagement {
     }
 
     /// Get employee details
-    pub fn get_employee(&self, employee_address: Address) -> (U256, Address, Vec<u8>, U256, U256, U256, bool, U256) {
+    pub fn get_employee(&self, employee_address: Address) -> (U256, Address, Vec<u8>, U256, U256, bool) {
         let employee = self.employees.get(employee_address);
         (
             employee.id.get(),
             employee.employee_address.get(),
             employee.name.get_bytes(),
             employee.department.get(),
-            employee.salary.get(),
             employee.hire_date.get(),
             employee.is_active.get(),
-            employee.total_earned.get(),
         )
+    }
+
+    /// Get admin address
+    pub fn get_admin(&self) -> Address {
+        self.admin.get()
     }
 
     /// Check if employee exists and is active
     pub fn is_active_employee(&self, employee_address: Address) -> bool {
         self.employees.get(employee_address).is_active.get()
-    }
-   
-    /// Get admin address
-    pub fn get_admin(&self) -> Address {
-        self.admin.get()
     }
 
     // Internal functions

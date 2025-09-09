@@ -4,8 +4,7 @@
 #[no_mangle]
 pub extern "C" fn main() {}
 
-
 #[cfg(feature = "export-abi")]
 fn main() {
-    println!("ERC-6909 COntract for Stylus")
+    stylus_hello_world::print_from_args();
 }
